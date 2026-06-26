@@ -1,117 +1,117 @@
 """
-Tools the ReAct agent can call.
+Tools the ReAct agent can call — now with REAL detection.
 
-RIGHT NOW these are STUBS returning realistic fake data, so you can build and
-test the whole loop before touching real detection. This is deliberate: the
-detection method (hosted scan API vs axe-core CLI in-container) is the riskiest
-piece, so we keep it behind a clean JSON boundary and swap it in last.
+scan_page launches a headless Chromium (via Playwright), loads the URL, runs
+axe-core against the rendered DOM, and returns violations + "needs_review"
+(axe's "incomplete") items as JSON. It also embeds the surrounding HTML for each
+flagged element in the SAME browser session, so the agent gets context without
+relaunching the browser per element.
 
-When you're ready for real detection, replace ONLY the body of `scan_page`.
-The agent never changes — it just keeps getting JSON.
+The JSON shape is identical to the old stub, so the agent is unchanged.
 """
 
 import json
 from langchain_core.tools import tool
+from playwright.sync_api import sync_playwright
+from axe_playwright_python.sync_playwright import Axe
+
+_axe = Axe()
+# Ask axe for BOTH violations and incomplete items. "incomplete" = the things
+# axe flags but can't decide on its own — that's your judgment-call layer.
+_AXE_OPTS = {"resultTypes": ["violations", "incomplete"]}
+
+# Be tolerant of slow / JS-rendered pages without hanging forever.
+_NAV_TIMEOUT_MS = 30000
+_SETTLE_MS = 1500          # let client-side JS render after load
+_CONTEXT_CHARS = 1200      # cap embedded context so we don't flood the model
 
 
-# ---- STUB DATA: looks like real axe-core output -----------------------------
-# axe-core returns violations with: id, impact, help, and `nodes` (each node has
-# the offending `html` and a CSS `target`). We mimic that shape so swapping in
-# real axe-core later requires no changes to the agent.
-_FAKE_SCAN = {
-    "url": "https://example.com",
-    "violations": [
-        {
-            "id": "image-alt",
-            "impact": "critical",
-            "help": "Images must have alternate text",
-            "nodes": [
-                {"html": '<img src="/checkout-cart.png">',
-                 "target": ["main > section:nth-child(2) > img"]}
-            ],
-        },
-        {
-            "id": "color-contrast",
-            "impact": "serious",
-            "help": "Elements must meet minimum color contrast ratio thresholds",
-            "nodes": [
-                {"html": '<a class="cta" style="color:#9bd1ff;background:#ffffff">Buy now</a>',
-                 "target": [".cta"]}
-            ],
-        },
-        {
-            "id": "link-name",
-            "impact": "serious",
-            "help": "Links must have discernible text",
-            "nodes": [
-                {"html": '<a href="/returns">click here</a>',
-                 "target": ["footer > a:nth-child(3)"]}
-            ],
-        },
-        {
-            "id": "label",
-            "impact": "critical",
-            "help": "Form elements must have labels",
-            "nodes": [
-                {"html": '<input type="email" placeholder="Email">',
-                 "target": ["#newsletter > input"]}
-            ],
-        },
-    ],
-    # Items the scanner can't decide alone — it punts these to a human.
-    # THIS is where your agent's judgment layer earns its keep.
-    "needs_review": [
-        {
-            "id": "image-alt-quality",
-            "note": "Image has alt='image123' — present but possibly not meaningful.",
-            "html": '<img src="/team.jpg" alt="image123">',
-            "target": ["section.about > img"],
-        }
-    ],
-}
+def _selector(target) -> str:
+    """axe `target` is a list (nested lists for iframes). Flatten to one CSS string."""
+    parts = []
+    for t in (target or []):
+        parts.append(t if isinstance(t, str) else " ".join(t))
+    return " ".join(parts)
+
+
+def _context_for(page, selector: str) -> str:
+    """Return the parent element's outerHTML for `selector`, for contextual fixes."""
+    if not selector:
+        return ""
+    try:
+        el = page.query_selector(selector)
+        if not el:
+            return ""
+        html = el.evaluate("e => (e.parentElement || e).outerHTML")
+        return (html or "")[:_CONTEXT_CHARS]
+    except Exception:
+        return ""
 
 
 @tool
 def scan_page(url: str) -> str:
-    """Run an automated accessibility scan on the page at `url`.
+    """Run a real accessibility scan on the page at `url`.
 
-    Returns a JSON string with two parts:
-      - "violations": machine-detectable WCAG/508 failures (axe-core style).
-      - "needs_review": items the scanner flagged but cannot judge on its own.
-
-    Use this FIRST to find out what's wrong before reasoning about fixes.
+    Loads the page in a headless browser, runs axe-core (WCAG 2.x / Section 508),
+    and returns a JSON string with:
+      - "violations": detected failures, each node has html, target, and context.
+      - "needs_review": items axe flagged but couldn't decide (your judgment layer).
+    Call this FIRST.
     """
-    # TODO(real detection): replace this body with one of —
-    #   (a) an HTTP call to a hosted scan API that returns axe JSON, or
-    #   (b) a subprocess call to the axe-core CLI against a headless browser.
-    # Keep the return shape identical and the agent keeps working unchanged.
-    result = dict(_FAKE_SCAN)
-    result["url"] = url
-    return json.dumps(result)
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(url, wait_until="load", timeout=_NAV_TIMEOUT_MS)
+            page.wait_for_timeout(_SETTLE_MS)
+            resp = _axe.run(page, options=_AXE_OPTS).response
+
+            def node_obj(n):
+                sel = _selector(n.get("target"))
+                return {"html": n.get("html"), "target": sel,
+                        "context": _context_for(page, sel)}
+
+            violations = [{
+                "id": v.get("id"),
+                "impact": v.get("impact"),
+                "help": v.get("help"),
+                "nodes": [node_obj(n) for n in v.get("nodes", [])],
+            } for v in resp.get("violations", [])]
+
+            needs_review = []
+            for inc in resp.get("incomplete", []):
+                for n in inc.get("nodes", []):
+                    obj = node_obj(n)
+                    needs_review.append({"id": inc.get("id"), "note": inc.get("help"),
+                                         **obj})
+            browser.close()
+
+        return json.dumps({"url": url, "violations": violations,
+                           "needs_review": needs_review})
+    except Exception as e:
+        # Never crash the agent — return a structured error it can report.
+        return json.dumps({"url": url, "error": str(e),
+                           "violations": [], "needs_review": []})
 
 
 @tool
 def get_element_context(url: str, target: str) -> str:
-    """Fetch the surrounding HTML/context for the element at CSS selector `target`
-    on the page at `url`. Use this when you need nearby content (headings, link
-    destinations, neighboring text) to write a *specific, contextual* fix rather
-    than a generic one.
+    """Fallback: fetch surrounding HTML for CSS selector `target` on `url`.
+    Usually unnecessary because scan_page already embeds context per violation.
+    Use only when a violation's "context" came back empty.
     """
-    # TODO(real): fetch the page and return the parent/sibling markup for `target`.
-    # Stub returns plausible surrounding context per selector.
-    contexts = {
-        "main > section:nth-child(2) > img":
-            '<section><h2>Your shopping cart</h2>'
-            '<img src="/checkout-cart.png"><p>3 items ready for checkout.</p></section>',
-        "footer > a:nth-child(3)":
-            '<footer>... <a href="/returns">click here</a> to read our 30-day '
-            'return policy ...</footer>',
-        "#newsletter > input":
-            '<form id="newsletter"><h3>Get weekly deals</h3>'
-            '<input type="email" placeholder="Email"><button>Subscribe</button></form>',
-    }
-    return json.dumps({"target": target, "context": contexts.get(target, "<context unavailable>")})
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(url, wait_until="load", timeout=_NAV_TIMEOUT_MS)
+            page.wait_for_timeout(1000)
+            ctx = _context_for(page, target) or "<context unavailable>"
+            browser.close()
+        return json.dumps({"target": target, "context": ctx})
+    except Exception as e:
+        return json.dumps({"target": target, "context": "<context unavailable>",
+                           "error": str(e)})
 
 
-# Export the tool list the agent will use
 TOOLS = [scan_page, get_element_context]

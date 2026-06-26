@@ -8,7 +8,9 @@ the room watches the agent think and work, not just spit out an answer.
 """
 
 import sys
+import json
 from agent import build_agent
+from summary import compute_summary
 
 
 def main():
@@ -16,6 +18,8 @@ def main():
     agent = build_agent()
 
     print(f"\n=== Auditing {url} ===\n")
+
+    scan_json = {"violations": [], "needs_review": []}
 
     # stream_mode="updates" emits each node's output as it happens — perfect for
     # showing the loop. Each chunk is {node_name: {messages: [...]}}.
@@ -32,11 +36,26 @@ def main():
                         print(f"[ACTION] {tc['name']}({tc['args']})")
                 # Tool result (Observation)
                 elif msg.__class__.__name__ == "ToolMessage":
+                    if getattr(msg, "name", "") == "scan_page":
+                        try:
+                            scan_json = json.loads(msg.content)
+                        except Exception:
+                            pass
                     preview = str(msg.content)[:200]
                     print(f"[OBSERVATION] {preview}...\n")
                 # Model text (Thought / final report)
                 elif getattr(msg, "content", None):
                     print(f"[AGENT]\n{msg.content}\n")
+
+    # Deterministic summary — computed in code, not by the model.
+    s = compute_summary(scan_json)
+    print("=== SUMMARY (computed in code) ===")
+    print(f"  Scanned at:       {s['scanned_at']}")
+    print(f"  Score:            {s['score']}%  ({s['status']})")
+    print(f"  Rules failed:     {s['rules_failed']}")
+    print(f"  Total elements:   {s['total_violations']}")
+    print(f"  Critical / Warn:  {s['critical_count']} / {s['warning_count']}")
+    print(f"  Needs review:     {s['needs_review']}")
 
 
 if __name__ == "__main__":
