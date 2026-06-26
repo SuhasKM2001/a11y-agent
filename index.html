@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentCompliance.ai - Live Audit Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Markdown renderer for the remediation report (where the real fixes live) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+    <style>
+      /* Minimal styling for the rendered markdown report */
+      .markdown-body h1 { font-size: 1.5rem; font-weight: 800; margin: 1rem 0 .5rem; color:#e2e8f0; }
+      .markdown-body h2 { font-size: 1.1rem; font-weight: 700; margin: 1.25rem 0 .5rem; color:#cbd5e1; border-top:1px solid #1e293b; padding-top:1rem; }
+      .markdown-body h3 { font-size: 1rem; font-weight: 600; margin: 1rem 0 .4rem; color:#f1f5f9; }
+      .markdown-body p  { color:#94a3b8; margin:.4rem 0; line-height:1.6; }
+      .markdown-body ul { list-style: disc; margin:.4rem 0 .4rem 1.25rem; color:#94a3b8; }
+      .markdown-body li { margin:.2rem 0; }
+      .markdown-body strong { color:#cbd5e1; }
+      .markdown-body code { background:#0f172a; color:#a5b4fc; padding:1px 5px; border-radius:4px; font-size:.8rem; }
+      .markdown-body pre  { background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:.85rem; overflow-x:auto; margin:.6rem 0; }
+      .markdown-body pre code { background:transparent; color:#cbd5e1; padding:0; }
+      .markdown-body blockquote { border-left:3px solid #6366f1; padding-left:.85rem; margin:.6rem 0; color:#94a3b8; }
+      .markdown-body table { width:100%; border-collapse:collapse; margin:.6rem 0; font-size:.85rem; }
+      .markdown-body th, .markdown-body td { border:1px solid #1e293b; padding:.45rem .6rem; text-align:left; color:#cbd5e1; }
+      .markdown-body th { background:#0f172a; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans antialiased min-h-screen">
+
+    <!-- =================================================================== -->
+    <!-- CONFIG: point this at your backend.                                  -->
+    <!-- Local:    http://localhost:8000                                      -->
+    <!-- Deployed: paste your AgentBox public URL here after deploy.          -->
+    <!-- =================================================================== -->
+    <script>
+      const API_BASE = "https://ct-2419318a-24b6-4e85-9802-030b5c27257f-api.caas-us1.gmicloud.ai";
+      const SCAN_ENDPOINT = "/audit";
+    </script>
+
+    <div id="landing-screen" class="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-slate-900 to-slate-950">
+        <div class="max-w-2xl w-full text-center space-y-8">
+            <div class="space-y-3">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-sm font-medium">
+                    ✨ BETA Fund Hackathon Submission
+                </div>
+                <h1 class="text-5xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+                    AgentCompliance.ai
+                </h1>
+                <p class="text-slate-400 text-lg max-w-xl mx-auto">
+                    A focused AI worker that audits any live website for WCAG 2.1 AA / Section 508
+                    accessibility failures and writes the fixes.
+                </p>
+            </div>
+
+            <form id="scan-form" class="flex gap-3 bg-slate-900 p-2 rounded-xl border border-slate-800 shadow-2xl">
+                <input
+                    type="text"
+                    id="target-url-input"
+                    value="https://suhaskm.tech"
+                    placeholder="Enter a public website URL (e.g., https://suhaskm.tech)"
+                    class="flex-1 bg-transparent px-4 py-3 text-slate-200 placeholder-slate-500 focus:outline-none"
+                    required
+                />
+                <button
+                    type="submit"
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-6 py-3 rounded-lg transition shrink-0"
+                >
+                    Analyze Compliance
+                </button>
+            </form>
+            <p class="text-slate-600 text-xs">Tip: use a public URL. A deployed agent can't reach <code>localhost</code> on your machine.</p>
+        </div>
+    </div>
+
+    <div id="loading-screen" class="hidden min-h-screen flex flex-col items-center justify-center space-y-4">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
+        <p id="loading-text" class="text-slate-400 text-sm font-mono animate-pulse">
+            AI Agent crawling target URL...
+        </p>
+        <p class="text-slate-600 text-xs">A full scan takes ~20–60s (browser + axe + model reasoning).</p>
+    </div>
+
+    <div id="dashboard-screen" class="hidden min-h-screen flex flex-col">
+        <header class="border-b border-slate-800 bg-slate-900/50 backdrop-blur px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-2 cursor-pointer" onclick="showLanding()">
+                <span class="text-xl font-bold tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
+                    AgentCompliance.ai
+                </span>
+            </div>
+            <div class="flex items-center gap-4 max-w-xl w-full mx-8">
+                <input
+                    type="text"
+                    id="nav-url-input"
+                    class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none text-slate-200"
+                />
+                <button
+                    onclick="triggerRescan()"
+                    class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-sm px-4 py-2 rounded-lg transition shrink-0"
+                >
+                    Re-Scan
+                </button>
+            </div>
+            <button onclick="showLanding()" class="text-xs font-semibold tracking-wider text-slate-400 hover:text-white border border-slate-800 px-3 py-2 rounded-lg">
+                New Site
+            </button>
+        </header>
+
+        <main class="max-w-7xl mx-auto p-6 space-y-6 w-full flex-1">
+
+            <!-- Error banner (hidden unless the backend errors) -->
+            <div id="error-banner" class="hidden bg-red-500/10 border border-red-500/30 text-red-300 rounded-xl p-4 text-sm"></div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 flex items-center gap-6 shadow-xl">
+                    <div class="relative flex items-center justify-center h-32 w-32 shrink-0">
+                        <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" stroke="#1e293b" stroke-width="8" fill="transparent" />
+                            <circle id="score-circle" cx="50" cy="50" r="40" stroke="#ef4444" stroke-width="8" fill="transparent" stroke-dasharray="251.2" stroke-dashoffset="251.2" stroke-linecap="round" />
+                        </svg>
+                        <div class="absolute text-center">
+                            <span id="score-percentage" class="text-3xl font-extrabold">0%</span>
+                            <span id="score-status" class="block text-[10px] text-amber-500 font-bold uppercase mt-0.5">Calculating</span>
+                        </div>
+                    </div>
+                    <div class="space-y-1">
+                        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Global Compliance</h3>
+                        <div class="pt-2 space-y-1">
+                            <p id="critical-count-text" class="text-sm font-medium text-red-400">0 Critical Issues</p>
+                            <p id="warning-count-text" class="text-sm font-medium text-amber-400">0 Warnings Found</p>
+                            <p id="review-count-text" class="text-sm font-medium text-sky-400">0 Items Need Review</p>
+                            <p id="elements-count-text" class="text-xs text-slate-500">0 elements across 0 rules</p>
+                            <p id="scanned-at-text" class="text-[11px] text-slate-600 font-mono pt-1"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+                    <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Regulatory Status Quick-Look</h3>
+                    <div id="regulations-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-4">
+                <h2 class="text-lg font-bold tracking-tight text-slate-300 flex items-center gap-2">
+                    <span>AI Agent Findings</span>
+                    <span class="text-xs bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full font-mono">Live Audit Trace</span>
+                </h2>
+                <div id="violations-container" class="space-y-3"></div>
+            </div>
+
+            <!-- Needs-review findings (axe couldn't decide; the agent adjudicated) -->
+            <div id="review-block" class="space-y-4 hidden">
+                <h2 class="text-lg font-bold tracking-tight text-slate-300 flex items-center gap-2">
+                    <span>Needs Review</span>
+                    <span class="text-xs bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2 py-0.5 rounded-full font-mono">Agent-Adjudicated</span>
+                </h2>
+                <p class="text-sm text-slate-500 -mt-2">Automated scanners flag these as "can't determine" and stop. The agent's verdicts and fixes are in the full report below.</p>
+                <div id="review-container" class="space-y-3"></div>
+            </div>
+
+            <!-- Full remediation report (the model's reasoning + copy-paste fixes) -->
+            <div id="report-section" class="space-y-4 pt-4">
+                <h2 class="text-lg font-bold tracking-tight text-slate-300">Full Remediation Report</h2>
+                <div id="report-body" class="markdown-body bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl"></div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        const landingScreen = document.getElementById('landing-screen');
+        const loadingScreen = document.getElementById('loading-screen');
+        const dashboardScreen = document.getElementById('dashboard-screen');
+        const loadingText = document.getElementById('loading-text');
+
+        // Map axe rule IDs -> human name + WCAG criterion (drives the regulations grid honestly).
+        const WCAG_MAP = {
+            "color-contrast": { name: "Color Contrast", crit: "WCAG 1.4.3" },
+            "heading-order":  { name: "Heading Order", crit: "WCAG 1.3.1 / 2.4.6" },
+            "image-alt":      { name: "Non-text Content", crit: "WCAG 1.1.1" },
+            "label":          { name: "Form Labels", crit: "WCAG 1.3.1 / 4.1.2" },
+            "link-name":      { name: "Link Purpose", crit: "WCAG 2.4.4" },
+            "button-name":    { name: "Button Name", crit: "WCAG 4.1.2" },
+            "html-has-lang":  { name: "Page Language", crit: "WCAG 3.1.1" },
+            "document-title": { name: "Page Title", crit: "WCAG 2.4.2" },
+            "duplicate-id":   { name: "Duplicate IDs", crit: "WCAG 4.1.1" },
+            "aria-required-attr": { name: "ARIA Attributes", crit: "WCAG 4.1.2" }
+        };
+
+        let loadingTimer = null;
+        const LOADING_MSGS = [
+            "Launching headless browser on the target...",
+            "Running axe-core accessibility scan...",
+            "Agent reasoning over violations...",
+            "Generating contextual fixes...",
+            "Compiling remediation report..."
+        ];
+
+        document.getElementById('scan-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const url = normalizeUrl(document.getElementById('target-url-input').value);
+            document.getElementById('nav-url-input').value = url;
+            runScan(url);
+        });
+
+        function triggerRescan() {
+            const url = normalizeUrl(document.getElementById('nav-url-input').value);
+            runScan(url);
+        }
+
+        function showLanding() {
+            stopLoadingMsgs();
+            dashboardScreen.classList.add('hidden');
+            loadingScreen.classList.add('hidden');
+            landingScreen.classList.remove('hidden');
+        }
+
+        function normalizeUrl(u) {
+            u = (u || "").trim();
+            if (u && !/^https?:\/\//i.test(u)) u = "https://" + u;
+            return u;
+        }
+
+        function escapeHtml(s) {
+            return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+
+        function startLoadingMsgs() {
+            let i = 0;
+            loadingText.innerText = LOADING_MSGS[0];
+            loadingTimer = setInterval(() => {
+                i = (i + 1) % LOADING_MSGS.length;
+                loadingText.innerText = LOADING_MSGS[i];
+            }, 4000);
+        }
+        function stopLoadingMsgs() {
+            if (loadingTimer) { clearInterval(loadingTimer); loadingTimer = null; }
+        }
+
+        async function runScan(targetUrl) {
+            landingScreen.classList.add('hidden');
+            dashboardScreen.classList.add('hidden');
+            loadingScreen.classList.remove('hidden');
+            startLoadingMsgs();
+
+            // Long timeout — a full scan can take a minute.
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 120000);
+
+            try {
+                const response = await fetch(`${API_BASE}${SCAN_ENDPOINT}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: targetUrl }),
+                    signal: controller.signal
+                });
+                clearTimeout(timeout);
+                if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+                const data = await response.json();
+                stopLoadingMsgs();
+                renderDashboard(data);
+            } catch (error) {
+                clearTimeout(timeout);
+                stopLoadingMsgs();
+                console.error("Scan failed:", error);
+                showDashboardError(
+                    `Could not complete the scan. ${error.message}. ` +
+                    `Check that the backend is running and API_BASE is set correctly ` +
+                    `(currently ${API_BASE}).`
+                );
+            }
+        }
+
+        function showDashboardError(msg) {
+            loadingScreen.classList.add('hidden');
+            dashboardScreen.classList.remove('hidden');
+            const banner = document.getElementById('error-banner');
+            banner.innerText = msg;
+            banner.classList.remove('hidden');
+        }
+
+        function sevStyle(impact) {
+            switch ((impact || '').toLowerCase()) {
+                case 'critical': return { cls: 'bg-red-500/10 text-red-400 border-red-500/20', label: 'CRITICAL' };
+                case 'serious':  return { cls: 'bg-orange-500/10 text-orange-400 border-orange-500/20', label: 'SERIOUS' };
+                case 'moderate': return { cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20', label: 'MODERATE' };
+                default:         return { cls: 'bg-slate-500/10 text-slate-400 border-slate-500/20', label: (impact || 'MINOR').toUpperCase() };
+            }
+        }
+
+        function humanizeRule(id) {
+            if (WCAG_MAP[id]) return WCAG_MAP[id].name;
+            return (id || 'Issue').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        function renderDashboard(data) {
+            loadingScreen.classList.add('hidden');
+            dashboardScreen.classList.remove('hidden');
+            document.getElementById('error-banner').classList.add('hidden');
+
+            // Defensive defaults in case a field is missing.
+            const summary = data.summary || {};
+            const violations = Array.isArray(data.violations) ? data.violations : [];
+            const status = summary.status || '—';
+            const isReview = status === 'REVIEW REQUIRED';
+            const score = Number.isFinite(summary.score) ? summary.score : null;
+
+            // 1. Metrics (from summary — computed in code, always exact)
+            document.getElementById('critical-count-text').innerText = `${summary.critical_count || 0} Critical Issues`;
+            document.getElementById('warning-count-text').innerText = `${summary.warning_count || 0} Warnings Found`;
+            document.getElementById('review-count-text').innerText = `${summary.needs_review || 0} Items Need Review`;
+            document.getElementById('elements-count-text').innerText =
+                `${summary.total_violations || 0} elements across ${summary.rules_failed || 0} rules`;
+            document.getElementById('scanned-at-text').innerText =
+                summary.scanned_at ? `Scanned ${summary.scanned_at}` : '';
+
+            // Score ring — color + center text keyed to status.
+            const circle = document.getElementById('score-circle');
+            const pctEl = document.getElementById('score-percentage');
+            const stEl = document.getElementById('score-status');
+            const circumference = 251.2;
+            const statusColor =
+                status === 'PASS' ? '#10b981' :
+                isReview ? '#38bdf8' :
+                status === 'NEEDS WORK' ? '#f59e0b' : '#ef4444';
+
+            if (isReview) {
+                // No confirmed failures, but lots unverified — show the count, not a %.
+                pctEl.innerText = `${summary.needs_review || 0}`;
+                pctEl.classList.remove('text-3xl'); pctEl.classList.add('text-2xl');
+                stEl.innerText = 'TO REVIEW';
+                circle.style.strokeDashoffset = circumference * 0.5; // half ring = indeterminate
+            } else {
+                pctEl.classList.remove('text-2xl'); pctEl.classList.add('text-3xl');
+                pctEl.innerText = `${score === null ? 0 : score}%`;
+                stEl.innerText = status;
+                circle.style.strokeDashoffset = circumference - (circumference * (score || 0)) / 100;
+            }
+            circle.setAttribute('stroke', statusColor);
+            stEl.style.color = statusColor;
+
+            // Group needs_review items by rule id (they're flat objects, not nested).
+            const reviewGroups = {};
+            (Array.isArray(data.needs_review) ? data.needs_review : []).forEach(item => {
+                (reviewGroups[item.id] = reviewGroups[item.id] || { id: item.id, note: item.note, items: [] }).items.push(item);
+            });
+            const reviewGroupList = Object.values(reviewGroups);
+
+            // 2. Regulations grid — derived from real failing + review rules
+            const regsGrid = document.getElementById('regulations-grid');
+            regsGrid.innerHTML = '';
+            const overallStatus = violations.length ? 'fail' : reviewGroupList.length ? 'warning' : 'pass';
+            const overallText =
+                violations.length ? `${summary.total_violations || 0} issues found` :
+                reviewGroupList.length ? `${summary.needs_review || 0} items need review` : 'No issues';
+            regsGrid.innerHTML += regCard("WCAG 2.1 AA / Section 508", "Global", overallStatus, overallText);
+
+            violations.forEach(v => {
+                const meta = WCAG_MAP[v.id] || { name: humanizeRule(v.id), crit: "WCAG 2.1 AA" };
+                const st = (v.impact === 'critical' || v.impact === 'serious') ? 'fail' : 'warning';
+                const n = (v.nodes || []).length;
+                regsGrid.innerHTML += regCard(meta.name, meta.crit, st, `${n} element${n === 1 ? '' : 's'}`);
+            });
+            reviewGroupList.forEach(g => {
+                if (violations.some(v => v.id === g.id)) return; // don't double-list a rule
+                const meta = WCAG_MAP[g.id] || { name: humanizeRule(g.id), crit: "WCAG 2.1 AA" };
+                regsGrid.innerHTML += regCard(meta.name, meta.crit, 'warning', `${g.items.length} to review`);
+            });
+
+            // 3. Confirmed violations
+            const container = document.getElementById('violations-container');
+            container.innerHTML = '';
+            violations.forEach(v => {
+                const nodes = v.nodes || [];
+                container.innerHTML += findingCard({
+                    sev: sevStyle(v.impact),
+                    title: humanizeRule(v.id),
+                    count: nodes.length,
+                    help: v.help,
+                    example: nodes[0] ? nodes[0].html : '',
+                    selectors: nodes.map(n => n.target)
+                });
+            });
+
+            // 3b. Needs-review findings (the agent adjudicates what axe couldn't)
+            const reviewContainer = document.getElementById('review-container');
+            const reviewBlock = document.getElementById('review-block');
+            reviewContainer.innerHTML = '';
+            if (reviewGroupList.length) {
+                reviewBlock.classList.remove('hidden');
+                reviewGroupList.forEach(g => {
+                    reviewContainer.innerHTML += findingCard({
+                        sev: { cls: 'bg-sky-500/10 text-sky-400 border-sky-500/20', label: 'NEEDS REVIEW' },
+                        title: humanizeRule(g.id),
+                        count: g.items.length,
+                        help: g.note,
+                        example: g.items[0] ? g.items[0].html : '',
+                        selectors: g.items.map(i => i.target)
+                    });
+                });
+            } else {
+                reviewBlock.classList.add('hidden');
+            }
+
+            // Empty state only when truly nothing was found OR flagged
+            if (violations.length === 0 && reviewGroupList.length === 0) {
+                container.innerHTML = `
+                    <div class="p-8 text-center bg-slate-900 border border-slate-800 rounded-xl text-emerald-400">
+                        🎉 No accessibility issues detected on this page.
+                    </div>`;
+            }
+
+            // 4. Full remediation report (markdown -> HTML)
+            const reportBody = document.getElementById('report-body');
+            if (data.report) {
+                reportBody.innerHTML = marked.parse(data.report);
+                document.getElementById('report-section').classList.remove('hidden');
+            } else {
+                document.getElementById('report-section').classList.add('hidden');
+            }
+        }
+
+        function findingCard({ sev, title, count, help, example, selectors }) {
+            const ex = escapeHtml(example || '');
+            const sels = (selectors || []).map(t => `<code class="text-[11px]">${escapeHtml(t)}</code>`).join('<br>');
+            return `
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
+                    <div class="flex items-start justify-between gap-6">
+                        <div class="space-y-2 flex-1 min-w-0">
+                            <div class="flex items-center gap-3 flex-wrap">
+                                <span class="${sev.cls} border text-[10px] font-extrabold px-2 py-0.5 rounded">${sev.label}</span>
+                                <h4 class="text-base font-bold text-slate-200">${title}</h4>
+                                <span class="text-xs text-slate-500 font-mono">${count} element${count === 1 ? '' : 's'}</span>
+                            </div>
+                            <p class="text-sm text-slate-400">${escapeHtml(help || '')}</p>
+                            <div class="bg-slate-950 p-3 rounded border border-slate-800/80 mt-2 font-mono text-xs text-slate-300 overflow-x-auto">
+                                <span class="text-indigo-400 font-semibold block font-sans text-xs mb-1">Example flagged markup:</span>
+                                <pre class="whitespace-pre-wrap break-all">${ex}</pre>
+                            </div>
+                            <details class="text-xs text-slate-400 mt-1">
+                                <summary class="cursor-pointer text-slate-500 hover:text-slate-300">Show all affected selectors</summary>
+                                <div class="mt-2 pl-2 border-l border-slate-800">${sels}</div>
+                            </details>
+                        </div>
+                        <a href="#report-section" class="shrink-0 bg-slate-800 border border-slate-700 hover:bg-indigo-600 hover:border-indigo-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
+                            View fix ↓
+                        </a>
+                    </div>
+                </div>`;
+        }
+
+        function regCard(name, region, status, text) {
+            const icon = status === 'fail' ? '❌' : status === 'warning' ? '⚠️' : '✅';
+            const colorClass = status === 'fail' ? 'text-red-400' : status === 'warning' ? 'text-amber-400' : 'text-emerald-400';
+            return `
+                <div class="flex items-center justify-between p-3 bg-slate-950 border border-slate-800 rounded-lg">
+                    <div>
+                        <span class="font-bold text-sm block text-slate-200">${name} <span class="text-xs text-slate-500 ml-1">(${region})</span></span>
+                        <span class="text-[11px] font-bold ${colorClass}">${text}</span>
+                    </div>
+                    <div class="text-lg">${icon}</div>
+                </div>`;
+        }
+    </script>
+</body>
+</html>
