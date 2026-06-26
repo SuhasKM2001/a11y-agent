@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentCompliance.ai - Live Audit Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans antialiased min-h-screen">
+
+    <div id="landing-screen" class="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-slate-900 to-slate-950">
+        <div class="max-w-2xl w-full text-center space-y-8">
+            <div class="space-y-3">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-sm font-medium">
+                    ✨ BETA Fund Hackathon Submission
+                </div>
+                <h1 class="text-5xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+                    AgentCompliance.ai
+                </h1>
+                <p class="text-slate-400 text-lg max-w-xl mx-auto">
+                    Deploy focused AI workers that crawl your codebase and live deployments to surface government and regulatory compliance failures.
+                </p>
+            </div>
+
+            <form id="scan-form" class="flex gap-3 bg-slate-900 p-2 rounded-xl border border-slate-800 shadow-2xl">
+                <input 
+                    type="text" 
+                    id="target-url-input"
+                    value="localhost:5001"
+                    placeholder="Enter website URL (e.g., localhost:5001)"
+                    class="flex-1 bg-transparent px-4 py-3 text-slate-200 placeholder-slate-500 focus:outline-none"
+                    required
+                />
+                <button 
+                    type="submit" 
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-6 py-3 rounded-lg transition shrink-0"
+                >
+                    Analyze Compliance
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div id="loading-screen" class="hidden min-h-screen flex flex-col items-center justify-center space-y-4">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
+        <p id="loading-text" class="text-slate-400 text-sm font-mono animate-pulse">
+            AI Agent crawling target URL...
+        </p>
+    </div>
+
+    <div id="dashboard-screen" class="hidden min-h-screen flex flex-col">
+        <header class="border-b border-slate-800 bg-slate-900/50 backdrop-blur px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-2 cursor-pointer" onclick="showLanding()">
+                <span class="text-xl font-bold tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
+                    AgentCompliance.ai
+                </span>
+            </div>
+            <div class="flex items-center gap-4 max-w-xl w-full mx-8">
+                <input 
+                    type="text" 
+                    id="nav-url-input"
+                    class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none text-slate-200"
+                />
+                <button 
+                    onclick="triggerRescan()"
+                    class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-sm px-4 py-2 rounded-lg transition shrink-0"
+                >
+                    Re-Scan
+                </button>
+            </div>
+            <button onclick="showLanding()" class="text-xs font-semibold tracking-wider text-slate-400 hover:text-white border border-slate-800 px-3 py-2 rounded-lg">
+                New Site
+            </button>
+        </header>
+
+        <main class="max-w-7xl mx-auto p-6 space-y-6 w-full flex-1">
+            
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 flex items-center gap-6 shadow-xl">
+                    <div class="relative flex items-center justify-center h-32 w-32 shrink-0">
+                        <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" stroke="#1e293b" strokeWidth="8" fill="transparent" />
+                            <circle id="score-circle" cx="50" cy="50" r="40" stroke="#ef4444" strokeWidth="8" fill="transparent" strokeDasharray="251.2" strokeDashoffset="251.2" strokeLinecap="round" />
+                        </svg>
+                        <div class="absolute text-center">
+                            <span id="score-percentage" class="text-3xl font-extrabold">0%</span>
+                            <span id="score-status" class="block text-[10px] text-amber-500 font-bold uppercase mt-0.5">Calculating</span>
+                        </div>
+                    </div>
+                    <div class="space-y-1">
+                        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Global Compliance</h3>
+                        <div class="pt-2 space-y-1">
+                            <p id="critical-count-text" class="text-sm font-medium text-red-400">0 Critical Issues</p>
+                            <p id="warning-count-text" class="text-sm font-medium text-amber-400">0 Warnings Found</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+                    <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Regulatory Status Quick-Look</h3>
+                    <div id="regulations-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        </div>
+                </div>
+            </div>
+
+            <div class="space-y-4">
+                <h2 class="text-lg font-bold tracking-tight text-slate-300 flex items-center gap-2">
+                    <span>AI Agent Findings</span>
+                    <span class="text-xs bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full font-mono">Live Audit Trace</span>
+                </h2>
+
+                <div id="violations-container" class="space-y-3">
+                    </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const landingScreen = document.getElementById('landing-screen');
+        const loadingScreen = document.getElementById('loading-screen');
+        const dashboardScreen = document.getElementById('dashboard-screen');
+        const loadingText = document.getElementById('loading-text');
+
+        document.getElementById('scan-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const url = document.getElementById('target-url-input').value;
+            document.getElementById('nav-url-input').value = url;
+            runScan(url);
+        });
+
+        function triggerRescan() {
+            const url = document.getElementById('nav-url-input').value;
+            runScan(url);
+        }
+
+        function showLanding() {
+            dashboardScreen.classList.add('hidden');
+            loadingScreen.classList.add('hidden');
+            landingScreen.classList.remove('hidden');
+        }
+
+        async function runScan(targetUrl) {
+            // Show loading screen state
+            landingScreen.add ? landingScreen.add('hidden') : landingScreen.classList.add('hidden');
+            dashboardScreen.classList.add('hidden');
+            loadingScreen.classList.remove('hidden');
+            loadingText.innerText = `AI Agent crawling ${targetUrl} & scanning global regulatory schemas...`;
+
+            try {
+                const response = await fetch('http://localhost:8888/api/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: targetUrl })
+                });
+                const data = await response.json();
+                
+                renderDashboard(data);
+            } catch (error) {
+                console.error("Scan failed:", error);
+                alert("Error communicating with your Python backend. Ensure app.py is running on port 8000.");
+                showLanding();
+            }
+        }
+
+        function renderDashboard(data) {
+            // Hide loading, show dashboard
+            loadingScreen.classList.add('hidden');
+            dashboardScreen.classList.remove('hidden');
+
+            // 1. Update Score & Metrics
+            document.getElementById('score-percentage').innerText = `${data.score}%`;
+            document.getElementById('score-status').innerText = data.status;
+            document.getElementById('critical-count-text').innerText = `${data.critical_count} Critical Issues`;
+            document.getElementById('warning-count-text').innerText = `${data.warning_count} Warnings Found`;
+
+            // Adjust SVG Ring Dashoffset
+            const circle = document.getElementById('score-circle');
+            const circumference = 251.2;
+            circle.style.strokeDashoffset = circumference - (circumference * data.score) / 100;
+
+            // 2. Render Regulations Grid
+            const regsGrid = document.getElementById('regulations-grid');
+            regsGrid.innerHTML = ''; // clear old values
+            data.regulations.forEach(reg => {
+                const icon = reg.status === 'fail' ? '❌' : reg.status === 'warning' ? '⚠️' : '✅';
+                const colorClass = reg.status === 'fail' ? 'text-red-400' : reg.status === 'warning' ? 'text-amber-400' : 'text-emerald-400';
+                
+                regsGrid.innerHTML += `
+                    <div class="flex items-center justify-between p-3 bg-slate-950 border border-slate-800 rounded-lg">
+                        <div>
+                            <span class="font-bold text-sm block text-slate-200">${reg.name} <span class="text-xs text-slate-500 ml-1">(${reg.region})</span></span>
+                            <span class="text-[11px] font-bold ${colorClass}">${reg.text}</span>
+                        </div>
+                        <div class="text-lg">${icon}</div>
+                    </div>
+                `;
+            });
+
+            // 3. Render Violations Cards
+            const violationsContainer = document.getElementById('violations-container');
+            violationsContainer.innerHTML = ''; // clear old values
+
+            if (!data.violations || data.violations.length === 0) {
+                violationsContainer.innerHTML = `
+                    <div class="p-8 text-center bg-slate-900 border border-slate-800 rounded-xl text-slate-400">
+                        🎉 Excellent! No regulatory violations identified on this layout.
+                    </div>
+                `;
+            } else {
+                data.violations.forEach(item => {
+                    violationsContainer.innerHTML += `
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 shadow-lg">
+                            <div class="space-y-2 flex-1">
+                                <div class="flex items-center gap-3">
+                                    <span class="bg-red-500/10 text-red-400 border border-red-500/20 text-[10px] font-extrabold px-2 py-0.5 rounded">
+                                        ${item.severity}
+                                    </span>
+                                    <h4 class="text-base font-bold text-slate-200">${item.title}</h4>
+                                </div>
+                                <div class="text-sm text-slate-400 space-y-1">
+                                    <p><strong class="text-slate-300">Framework:</strong> ${item.impact} — ${item.finding}</p>
+                                    <div class="bg-slate-950 p-3 rounded border border-slate-800/80 mt-2 font-mono text-xs text-slate-300">
+                                        <span class="text-indigo-400 font-semibold block font-sans text-xs mb-1">Agent Suggested Remediation Patch:</span>
+                                        ${item.fix}
+                                    </div>
+                                </div>
+                            </div>
+                            <button class="w-full md:w-auto bg-slate-800 border border-slate-700 hover:bg-indigo-600 hover:border-indigo-500 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition shrink-0">
+                                Fix with Agent
+                            </button>
+                        </div>
+                    `;
+                });
+            }
+        }
+    </script>
+</body>
+</html>
