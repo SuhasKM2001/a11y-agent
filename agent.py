@@ -29,8 +29,12 @@ def build_model() -> ChatOpenAI:
     either GMI_* or OPENAI_* names because AgentBox injects credentials at runtime
     and the exact names can vary — this avoids a deploy-time surprise.
     """
-    api_key = os.environ.get("GMI_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    base_url = (os.environ.get("GMI_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+    api_key = (os.environ.get("GMI_MAAS_API_KEY")      # AgentBox injects this
+               or os.environ.get("GMI_API_KEY")
+               or os.environ.get("OPENAI_API_KEY"))
+    base_url = (os.environ.get("GMI_MAAS_BASE_URL")    # AgentBox injects this
+                or os.environ.get("GMI_BASE_URL")
+                or os.environ.get("OPENAI_BASE_URL")
                 or "https://api.gmi-serving.com/v1")
     model = (os.environ.get("GMI_MODEL") or os.environ.get("MODEL")
              or "nvidia/nemotron-3-ultra-550b-a55b")
@@ -41,11 +45,17 @@ def build_model() -> ChatOpenAI:
             "environment or .env file."
         )
 
+    # GMI injects GMI_MAAS_BASE_URL as 'https://api.gmi-serving.com' (no /v1),
+    # but the OpenAI-compatible endpoint lives under /v1. Normalize so requests
+    # hit /v1/chat/completions whether the suffix is present or not.
+    if base_url and not base_url.rstrip("/").endswith("/v1"):
+        base_url = base_url.rstrip("/") + "/v1"
+
     return ChatOpenAI(
         model=model,
         base_url=base_url,
         api_key=api_key,
-        temperature=0,          # determinism matters for a compliance tool
+        temperature=0,
         timeout=60,
     )
 
